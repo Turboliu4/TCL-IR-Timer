@@ -8,7 +8,6 @@ import android.content.SharedPreferences;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
-import android.os.SystemClock;
 import android.provider.Settings;
 import android.text.InputType;
 import android.text.format.DateFormat;
@@ -136,22 +135,31 @@ public final class TimerActivity extends Activity {
                     .show();
             return;
         }
-        long delayMillis = delay * 60_000L;
-        alarms.setExactAndAllowWhileIdle(AlarmManager.ELAPSED_REALTIME_WAKEUP,
-                SystemClock.elapsedRealtime() + delayMillis,
+        long deadline = System.currentTimeMillis() + delay * 60_000L;
+        PendingIntent showTimer = PendingIntent.getActivity(this, 0,
+                new Intent(this, TimerActivity.class), PendingIntent.FLAG_IMMUTABLE);
+        alarms.setAlarmClock(new AlarmManager.AlarmClockInfo(deadline, showTimer),
                 pendingIntent(text, PendingIntent.FLAG_UPDATE_CURRENT));
         preferences.edit().putString("command", text).putString("minutes", Integer.toString(delay))
-                .putLong("deadline", System.currentTimeMillis() + delayMillis)
+                .putLong("deadline", deadline)
                 .remove("result").apply();
         updateStatus();
     }
 
     private void updateStatus() {
         long deadline = preferences.getLong("deadline", 0);
-        if (deadline != 0 && pendingIntent("", PendingIntent.FLAG_NO_CREATE) != null) {
+        if (deadline != 0) {
             String time = DateFormat.getMediumDateFormat(this).format(new Date(deadline))
                     + " " + DateFormat.getTimeFormat(this).format(new Date(deadline));
-            status.setText("预计发射时间：" + time);
+            if (Build.VERSION.SDK_INT >= 31 && !alarms.canScheduleExactAlarms()) {
+                status.setText("精确闹钟权限已关闭，请授权后重新设置定时");
+            } else if (pendingIntent("", PendingIntent.FLAG_NO_CREATE) == null) {
+                status.setText("定时已失效，请重新设置");
+            } else if (System.currentTimeMillis() >= deadline) {
+                status.setText("定时已逾期，尚无发射结果。原定时间：" + time);
+            } else {
+                status.setText("预计发射时间：" + time);
+            }
         } else {
             status.setText(preferences.getString("result", "当前没有定时"));
         }
