@@ -1,1 +1,11 @@
-# TCL-IR-Timer
+# TCL 空调红外定时
+
+Android 应用记录现有遥控应用调用系统红外接口时发出的指令，保存并一次性定时重发。
+
+1. 安装 APK，在 LSPosed 中启用 **TCL 空调定时**。模块作用域只选能控制 TCL 空调的原遥控应用，然后重新启动原遥控应用。
+2. 在原遥控应用里按一次需要定时执行的按钮。在 LSPosed 模块日志中找到最新以 `TCLIR:` 开头的指令，复制完整一行。
+3. 打开 **TCL 空调定时**，粘贴指令并点 **立即试发**。确认空调正确响应后，输入延时并点 **设置定时**。Android 12 及以上若要求授权精确闹钟，请在授权后返回重新设置。
+
+手机需要支持 Android 的 `ConsumerIrManager`。使用厂商私有接口的遥控应用可能没有 `TCLIR:` 日志。定时执行时，将手机红外发射口对准空调。重新设置会替换上一次定时，重启手机后需要重新设置。
+
+使用 JDK 17、Gradle 8.9 和 Android SDK 35 运行 `gradle :app:assembleDebug`。APK 位于 `app/build/outputs/apk/debug/`。
