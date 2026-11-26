@@ -3,6 +3,7 @@ package io.github.turboliu4.tclirtimer;
 import android.app.Activity;
 import android.app.AlarmManager;
 import android.app.PendingIntent;
+import android.app.TimePickerDialog;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.net.Uri;
@@ -19,6 +20,7 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import java.util.Calendar;
 import java.util.Date;
 
 public final class TimerActivity extends Activity {
@@ -74,7 +76,8 @@ public final class TimerActivity extends Activity {
             Toast.makeText(this, "已调用系统红外发射，请确认空调响应", Toast.LENGTH_SHORT)
                     .show();
         });
-        addButton(content, "设置定时", this::schedule);
+        addButton(content, "按分钟设置", this::scheduleDelay);
+        addButton(content, "按时间设置", this::pickTime);
         addButton(content, "取消定时", () -> {
             PendingIntent pending = pendingIntent("", PendingIntent.FLAG_NO_CREATE);
             if (pending != null) {
@@ -98,17 +101,18 @@ public final class TimerActivity extends Activity {
     private void addButton(LinearLayout content, String label, Runnable action) {
         Button button = new Button(this);
         button.setText(label);
-        button.setOnClickListener(view -> {
-            try {
-                action.run();
-            } catch (NumberFormatException error) {
-                Toast.makeText(this, "请检查指令和分钟数的数字格式", Toast.LENGTH_LONG)
-                        .show();
-            } catch (RuntimeException error) {
-                Toast.makeText(this, error.getMessage(), Toast.LENGTH_LONG).show();
-            }
-        });
+        button.setOnClickListener(view -> runAction(action));
         content.addView(button);
+    }
+
+    private void runAction(Runnable action) {
+        try {
+            action.run();
+        } catch (NumberFormatException error) {
+            Toast.makeText(this, "请检查指令和分钟数的数字格式", Toast.LENGTH_LONG).show();
+        } catch (RuntimeException error) {
+            Toast.makeText(this, error.getMessage(), Toast.LENGTH_LONG).show();
+        }
     }
 
     private PendingIntent pendingIntent(String text, int flag) {
@@ -116,17 +120,44 @@ public final class TimerActivity extends Activity {
         return PendingIntent.getBroadcast(this, 1, intent, flag | PendingIntent.FLAG_IMMUTABLE);
     }
 
-    private void schedule() {
+    private void scheduleDelay() {
+        int delay = Integer.parseInt(minutes.getText().toString().trim());
+        if (delay < 1 || delay > 1440) {
+            throw new IllegalArgumentException("延时范围为 1–1440 分钟");
+        }
+        schedule(System.currentTimeMillis() + delay * 60_000L, Integer.toString(delay));
+    }
+
+    private void pickTime() {
+        Calendar suggested = Calendar.getInstance();
+        suggested.add(Calendar.MINUTE, 1);
+        new TimePickerDialog(this, (picker, hour, minute) -> runAction(() -> {
+            Calendar now = Calendar.getInstance();
+            Calendar selected = (Calendar) now.clone();
+            selected.set(Calendar.HOUR_OF_DAY, hour);
+            selected.set(Calendar.MINUTE, minute);
+            selected.set(Calendar.SECOND, 0);
+            selected.set(Calendar.MILLISECOND, 0);
+            if (selected.getTimeInMillis() <= now.getTimeInMillis()) {
+                selected = (Calendar) now.clone();
+                selected.add(Calendar.DAY_OF_MONTH, 1);
+                selected.set(Calendar.HOUR_OF_DAY, hour);
+                selected.set(Calendar.MINUTE, minute);
+                selected.set(Calendar.SECOND, 0);
+                selected.set(Calendar.MILLISECOND, 0);
+            }
+            schedule(selected.getTimeInMillis(), null);
+        }), suggested.get(Calendar.HOUR_OF_DAY), suggested.get(Calendar.MINUTE),
+                DateFormat.is24HourFormat(this)).show();
+    }
+
+    private void schedule(long deadline, String delayMinutes) {
         String text = command.getText().toString();
         TimerReceiver.parse(text);
         android.hardware.ConsumerIrManager ir =
                 getSystemService(android.hardware.ConsumerIrManager.class);
         if (ir == null || !ir.hasIrEmitter()) {
             throw new IllegalStateException("Android 未检测到可用的红外发射器");
-        }
-        int delay = Integer.parseInt(minutes.getText().toString().trim());
-        if (delay < 1 || delay > 1440) {
-            throw new IllegalArgumentException("延时范围为 1–1440 分钟");
         }
         if (Build.VERSION.SDK_INT >= 31 && !alarms.canScheduleExactAlarms()) {
             startActivity(new Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,
@@ -135,14 +166,16 @@ public final class TimerActivity extends Activity {
                     .show();
             return;
         }
-        long deadline = System.currentTimeMillis() + delay * 60_000L;
         PendingIntent showTimer = PendingIntent.getActivity(this, 0,
                 new Intent(this, TimerActivity.class), PendingIntent.FLAG_IMMUTABLE);
         alarms.setAlarmClock(new AlarmManager.AlarmClockInfo(deadline, showTimer),
                 pendingIntent(text, PendingIntent.FLAG_UPDATE_CURRENT));
-        preferences.edit().putString("command", text).putString("minutes", Integer.toString(delay))
-                .putLong("deadline", deadline)
-                .remove("result").apply();
+        SharedPreferences.Editor settings = preferences.edit().putString("command", text)
+                .putLong("deadline", deadline).remove("result");
+        if (delayMinutes != null) {
+            settings.putString("minutes", delayMinutes);
+        }
+        settings.apply();
         updateStatus();
     }
 
